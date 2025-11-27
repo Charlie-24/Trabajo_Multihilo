@@ -1,32 +1,32 @@
-27 11 2025 08:45:49 + Control de temperatura de la cpu: 36.6 °C + IP: 172.20.10.2
-27 11 2025 08:45:49 + Control de temperatura de la gpu: 49.6 °C + IP: 172.20.10.2
-27 11 2025 08:45:49 + Utilización de memoria: 82.6% + IP: 172.20.10.2
-27 11 2025 08:45:49 + Tareas en ejecución: Worker-1, Worker-2, Worker-3, Worker-4
+27 11 2025 09:29:37 + Control de temperatura de la CPU: 0.0 °C + IP: 172.20.10.2
+27 11 2025 09:29:37 + Control de temperatura de la GPU: 37.0 °C + IP: 172.20.10.2
+27 11 2025 09:29:37 + Utilización de memoria: 62.0% + IP: 172.20.10.2
+27 11 2025 09:29:37 + Tareas en ejecución: Worker-1, Worker-2, Worker-3, Worker-4
 
 ---
 
-27 11 2025 08:45:50 + Control de temperatura de la cpu: 41.8 °C + IP: 172.20.10.2
-27 11 2025 08:45:50 + Control de temperatura de la gpu: 47.8 °C + IP: 172.20.10.2
-27 11 2025 08:45:50 + Utilización de memoria: 65.1% + IP: 172.20.10.2
-27 11 2025 08:45:50 + Tareas en ejecución: Worker-1, Worker-2, Worker-3, Worker-4
+27 11 2025 09:29:38 + Control de temperatura de la CPU: 0.0 °C + IP: 172.20.10.2
+27 11 2025 09:29:38 + Control de temperatura de la GPU: 37.0 °C + IP: 172.20.10.2
+27 11 2025 09:29:38 + Utilización de memoria: 61.9% + IP: 172.20.10.2
+27 11 2025 09:29:38 + Tareas en ejecución: Worker-1, Worker-2, Worker-3, Worker-4
 
 ---
 
-27 11 2025 08:45:51 + Control de temperatura de la cpu: 41.7 °C + IP: 172.20.10.2
-27 11 2025 08:45:51 + Control de temperatura de la gpu: 48.2 °C + IP: 172.20.10.2
-27 11 2025 08:45:51 + Utilización de memoria: 39.3% + IP: 172.20.10.2
-27 11 2025 08:45:51 + Tareas en ejecución: Worker-1, Worker-2, Worker-3, Worker-4
+27 11 2025 09:29:39 + Control de temperatura de la CPU: 0.0 °C + IP: 172.20.10.2
+27 11 2025 09:29:39 + Control de temperatura de la GPU: 37.0 °C + IP: 172.20.10.2
+27 11 2025 09:29:39 + Utilización de memoria: 61.9% + IP: 172.20.10.2
+27 11 2025 09:29:39 + Tareas en ejecución: Worker-1, Worker-2, Worker-3, Worker-4
 
 ---
 
-27 11 2025 08:45:54 + Control de temperatura de la cpu: 47.6 °C + IP: 172.20.10.2
-27 11 2025 08:45:54 + Control de temperatura de la gpu: 46.4 °C + IP: 172.20.10.2
-27 11 2025 08:45:54 + Utilización de memoria: 47.1% + IP: 172.20.10.2
-27 11 2025 08:45:54 + Tareas en ejecución: Worker-1, Worker-2, Worker-3, Worker-4
+27 11 2025 09:29:40 + Control de temperatura de la CPU: 0.0 °C + IP: 172.20.10.2
+27 11 2025 09:29:40 + Control de temperatura de la GPU: 37.0 °C + IP: 172.20.10.2
+27 11 2025 09:29:40 + Utilización de memoria: 61.8% + IP: 172.20.10.2
+27 11 2025 09:29:40 + Tareas en ejecución: Worker-1, Worker-2, Worker-3, Worker-4
 
 ---
 
-27 11 2025 08:45:55 + Control de temperatura de la cpu: 41.7 °C + IP: 172.20.10.2
-27 11 2025 08:45:55 + Control de temperatura de la gpu: 49.2 °C + IP: 172.20.10.2
-27 11 2025 08:45:55 + Utilización de memoria: 88.0% + IP: 172.20.10.2
-27 11 2025 08:45:55 + Tareas en ejecución: Worker-1, Worker-2, Worker-3, Worker-4
+27 11 2025 09:29:41 + Control de temperatura de la CPU: 0.0 °C + IP: 172.20.10.2
+27 11 2025 09:29:41 + Control de temperatura de la GPU: 37.0 °C + IP: 172.20.10.2
+27 11 2025 09:29:41 + Utilización de memoria: 61.8% + IP: 172.20.10.2
+27 11 2025 09:29:41 + Tareas en ejecución: Worker-1, Worker-2, Worker-3, Worker-4

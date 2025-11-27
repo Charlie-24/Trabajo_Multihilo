@@ -1,17 +1,31 @@
-import threading, time, socket, os, random, datetime, sys
+import threading
+import time
+import socket
+import os
+import datetime
+import psutil
+import wmi
+
+# Intentar importar pynvml para GPU NVIDIA
+try:
+    import pynvml
+    pynvml.nvmlInit()
+    HAS_GPU = True
+except Exception:
+    HAS_GPU = False
 
 LOG_FILE = "Trabajo_multihilo/monitor.log"
-THRESHOLD = 45.0  # grados
+THRESHOLD = 1.0  # °C
 lock = threading.Lock()
-entries = []  # cada "entrada" es el grupo de líneas generado cuando se supera el umbral
-RUN_EVENTS = 10  # número de eventos de umbral a simular para la demo
+entries = []
+RUN_EVENTS = 6  # número de eventos de umbral para demo
 
-# --- asegurar que la carpeta existe ---
+# --- crear carpeta si no existe ---
 log_dir = os.path.dirname(LOG_FILE)
-if log_dir:  # si LOG_FILE contiene un directorio (no está solo en la carpeta actual)
+if log_dir:
     os.makedirs(log_dir, exist_ok=True)
 
-# Intenta obtener IP real (sin enviar datos)
+# --- obtener IP local ---
 def get_ip_address():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -20,33 +34,53 @@ def get_ip_address():
         ip = s.getsockname()[0]
         s.close()
         return ip
-    except Exception:
-        try:
-            return socket.gethostbyname(socket.gethostname())
-        except Exception:
-            return '127.0.0.1'
+    except:
+        return '127.0.0.1'
 
 IP_ADDR = get_ip_address()
-
-# Hilos "tareas" que simulan trabajo concurrente.
 worker_threads = []
 stop_event = threading.Event()
 
+# --- hilos que simulan tareas ---
 def worker(name, interval):
     while not stop_event.is_set():
         time.sleep(interval)
 
+# --- funciones para obtener datos reales ---
+def get_cpu_temperature():
+    try:
+        w = wmi.WMI(namespace="root\\wmi")
+        temps = w.MSAcpi_ThermalZoneTemperature()
+        if temps:
+            return temps[0].CurrentTemperature / 10 - 273.15
+    except:
+        pass
+    return 0.0
+
+def get_gpu_temperature():
+    if not HAS_GPU:
+        return 0.0
+    try:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        return pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+    except:
+        return 0.0
+
+def get_memory_usage():
+    return psutil.virtual_memory().percent
+
+# --- crear entrada de log ---
 def create_log_entry(cpu_temp, gpu_temp, mem_percent, running_tasks):
     ts = datetime.datetime.now().strftime("%d %m %Y %H:%M:%S")
-    lines = []
-    lines.append(f"{ts} + Control de temperatura de la cpu: {cpu_temp:.1f} °C + IP: {IP_ADDR}")
-    lines.append(f"{ts} + Control de temperatura de la gpu: {gpu_temp:.1f} °C + IP: {IP_ADDR}")
-    lines.append(f"{ts} + Utilización de memoria: {mem_percent:.1f}% + IP: {IP_ADDR}")
-    lines.append(f"{ts} + Tareas en ejecución: {', '.join(running_tasks)}")
+    lines = [
+        f"{ts} + Control de temperatura de la CPU: {cpu_temp:.1f} °C + IP: {IP_ADDR}",
+        f"{ts} + Control de temperatura de la GPU: {gpu_temp:.1f} °C + IP: {IP_ADDR}",
+        f"{ts} + Utilización de memoria: {mem_percent:.1f}% + IP: {IP_ADDR}",
+        f"{ts} + Tareas en ejecución: {', '.join(running_tasks)}"
+    ]
     return "\n".join(lines)
 
 def write_log_file():
-    # Escribe el contenido actual de `entries` en el fichero, manteniendo orden cronológico y solo las últimas 5 entradas
     try:
         with open(LOG_FILE, 'w', encoding='utf-8') as f:
             for i, entry in enumerate(entries):
@@ -56,18 +90,15 @@ def write_log_file():
     except Exception as e:
         print("Error al escribir el log:", e)
 
-# Monitor que comprueba la temperatura (aquí simulada si no hay sensores)
+# --- hilo monitor ---
 event_counter = 0
-
 def cpu_monitor_loop():
     global event_counter
     while event_counter < RUN_EVENTS:
-        base_cpu = 35 + random.random() * 15  # 35..50
-        base_gpu = 30 + random.random() * 20  # 30..50
-        cpu_temp = base_cpu
-        gpu_temp = base_gpu
-        mem_percent = 30 + random.random() * 60  # 30..90
-        
+        cpu_temp = get_cpu_temperature()
+        gpu_temp = get_gpu_temperature()
+        mem_percent = get_memory_usage()
+
         if cpu_temp > THRESHOLD or gpu_temp > THRESHOLD:
             running_tasks = [t.name for t in threading.enumerate() if t.name.startswith("Worker-")]
             entry_text = create_log_entry(cpu_temp, gpu_temp, mem_percent, running_tasks)
@@ -77,31 +108,37 @@ def cpu_monitor_loop():
                     entries[:] = entries[-5:]
                 write_log_file()
                 event_counter += 1
+
         time.sleep(1.0)
 
-# Lanzar algunos hilos workers para simular concurrencia/tareas en ejecución
+# --- lanzar hilos workers ---
 for i in range(1, 5):
     t = threading.Thread(target=worker, args=(f"task{i}", 0.6 + i*0.2), name=f"Worker-{i}", daemon=True)
     worker_threads.append(t)
     t.start()
 
-# Lanzar monitor en hilo aparte
+# --- lanzar monitor ---
 monitor_thread = threading.Thread(target=cpu_monitor_loop, name="CPU-Monitor", daemon=True)
 monitor_thread.start()
 
-# Esperar a que el monitor simule el número de eventos deseado
+# --- esperar a que termine demo ---
 while event_counter < RUN_EVENTS:
     time.sleep(0.2)
 
-# Terminamos la demo
 stop_event.set()
 time.sleep(0.2)
 
-# Mostrar el fichero log resultante
+# --- mostrar log final ---
 print("Contenido final de", LOG_FILE, ":\n")
 with open(LOG_FILE, 'r', encoding='utf-8') as f:
-    content = f.read()
-print(content)
+    print(f.read())
 
 print(f"\nFichero guardado en: {os.path.abspath(LOG_FILE)}")
-print(f"\nNúmero de entradas guardadas: {len(entries)} (debe ser <= 5)")
+print(f"\nNúmero de entradas guardadas: {len(entries)} (<= 5)")
+
+# --- limpiar pynvml al final ---
+if HAS_GPU:
+    try:
+        pynvml.nvmlShutdown()
+    except:
+        pass
