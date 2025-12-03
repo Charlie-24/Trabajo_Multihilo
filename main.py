@@ -14,11 +14,22 @@ try:
 except Exception:
     HAS_GPU = False
 
+from influxdb_client_3 import InfluxDBClient3, Point
+
+# --- Configuración de InfluxDB ---
+INFLUX_HOST = "http://localhost:8181"
+DATABASE = "sensores"
+client = InfluxDBClient3(host=INFLUX_HOST, database=DATABASE, token=None)
+
+# --- Configuración del log local ---
 LOG_FILE = "Trabajo_multihilo/monitor.log"
-THRESHOLD = 1.0  # °C
+THRESHOLD = 20.0  # °C
+RUN_EVENTS = 6    # número de lecturas
 lock = threading.Lock()
 entries = []
-RUN_EVENTS = 6  # número de eventos de umbral para demo
+event_counter = 0
+worker_threads = []
+stop_event = threading.Event()
 
 # --- crear carpeta si no existe ---
 log_dir = os.path.dirname(LOG_FILE)
@@ -38,8 +49,6 @@ def get_ip_address():
         return '127.0.0.1'
 
 IP_ADDR = get_ip_address()
-worker_threads = []
-stop_event = threading.Event()
 
 # --- hilos que simulan tareas ---
 def worker(name, interval):
@@ -73,10 +82,10 @@ def get_memory_usage():
 def create_log_entry(cpu_temp, gpu_temp, mem_percent, running_tasks):
     ts = datetime.datetime.now().strftime("%d %m %Y %H:%M:%S")
     lines = [
-        f"{ts} + Control de temperatura de la CPU: {cpu_temp:.1f} °C + IP: {IP_ADDR}",
-        f"{ts} + Control de temperatura de la GPU: {gpu_temp:.1f} °C + IP: {IP_ADDR}",
-        f"{ts} + Utilización de memoria: {mem_percent:.1f}% + IP: {IP_ADDR}",
-        f"{ts} + Tareas en ejecución: {', '.join(running_tasks)}"
+        f"{ts} + CPU: {cpu_temp:.1f} °C + IP: {IP_ADDR}",
+        f"{ts} + GPU: {gpu_temp:.1f} °C + IP: {IP_ADDR}",
+        f"{ts} + Memoria: {mem_percent:.1f}% + IP: {IP_ADDR}",
+        f"{ts} + Tareas: {', '.join(running_tasks)}"
     ]
     return "\n".join(lines)
 
@@ -91,23 +100,36 @@ def write_log_file():
         print("Error al escribir el log:", e)
 
 # --- hilo monitor ---
-event_counter = 0
 def cpu_monitor_loop():
     global event_counter
     while event_counter < RUN_EVENTS:
         cpu_temp = get_cpu_temperature()
         gpu_temp = get_gpu_temperature()
         mem_percent = get_memory_usage()
+        running_tasks = [t.name for t in threading.enumerate() if t.name.startswith("Worker-")]
 
-        if cpu_temp > THRESHOLD or gpu_temp > THRESHOLD:
-            running_tasks = [t.name for t in threading.enumerate() if t.name.startswith("Worker-")]
-            entry_text = create_log_entry(cpu_temp, gpu_temp, mem_percent, running_tasks)
-            with lock:
-                entries.append(entry_text)
-                if len(entries) > 5:
-                    entries[:] = entries[-5:]
-                write_log_file()
-                event_counter += 1
+        # --- Escribir en monitor.log solo últimas 5 entradas ---
+        entry_text = create_log_entry(cpu_temp, gpu_temp, mem_percent, running_tasks)
+        with lock:
+            entries.append(entry_text)
+            if len(entries) > 5:
+                entries[:] = entries[-5:]
+            write_log_file()
+
+        # --- Guardar todas las lecturas en InfluxDB ---
+        point = Point("system_monitor") \
+            .tag("host", IP_ADDR) \
+            .field("cpu_temp", cpu_temp) \
+            .field("gpu_temp", gpu_temp) \
+            .field("mem_percent", mem_percent) \
+            .time(datetime.datetime.utcnow())
+        try:
+            client.write(point)
+        except Exception as e:
+            print("Error al escribir en InfluxDB:", e)
+
+        event_counter += 1
+        print(f"Lectura {event_counter} guardada")
 
         time.sleep(1.0)
 
@@ -128,13 +150,7 @@ while event_counter < RUN_EVENTS:
 stop_event.set()
 time.sleep(0.2)
 
-# --- mostrar log final ---
-print("Contenido final de", LOG_FILE, ":\n")
-with open(LOG_FILE, 'r', encoding='utf-8') as f:
-    print(f.read())
-
-print(f"\nFichero guardado en: {os.path.abspath(LOG_FILE)}")
-print(f"\nNúmero de entradas guardadas: {len(entries)} (<= 5)")
+print(f"\nSe han guardado {RUN_EVENTS} lecturas en InfluxDB y las últimas 5 en '{LOG_FILE}'")
 
 # --- limpiar pynvml al final ---
 if HAS_GPU:
