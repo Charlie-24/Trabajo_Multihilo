@@ -15,11 +15,25 @@ except Exception:
     HAS_GPU = False
 
 from influxdb_client_3 import InfluxDBClient3, Point
+from datetime import datetime  # Para evitar conflictos con datetime.datetime
 
 # --- Configuración de InfluxDB ---
 INFLUX_HOST = "http://localhost:8181"
-DATABASE = "sensores"
+DATABASE = "Monitorizacion"
 client = InfluxDBClient3(host=INFLUX_HOST, database=DATABASE, token=None)
+
+# --- BORRAR Y RECREAR LA BASE DE DATOS ---
+try:
+    client.drop_database(DATABASE)
+    print(f"Base de datos '{DATABASE}' eliminada")
+except Exception as e:
+    print("No se pudo eliminar la base de datos (quizá no existía):", e)
+
+try:
+    client.create_database(DATABASE)
+    print(f"Base de datos '{DATABASE}' creada vacía")
+except Exception as e:
+    print("Error al crear la base de datos:", e)
 
 # --- Configuración del log local ---
 LOG_FILE = "Trabajo_multihilo/monitor.log"
@@ -80,7 +94,7 @@ def get_memory_usage():
 
 # --- crear entrada de log ---
 def create_log_entry(cpu_temp, gpu_temp, mem_percent, running_tasks):
-    ts = datetime.datetime.now().strftime("%d %m %Y %H:%M:%S")
+    ts = datetime.now().strftime("%d %m %Y %H:%M:%S")
     lines = [
         f"{ts} + CPU: {cpu_temp:.1f} °C + IP: {IP_ADDR}",
         f"{ts} + GPU: {gpu_temp:.1f} °C + IP: {IP_ADDR}",
@@ -122,7 +136,7 @@ def cpu_monitor_loop():
             .field("cpu_temp", cpu_temp) \
             .field("gpu_temp", gpu_temp) \
             .field("mem_percent", mem_percent) \
-            .time(datetime.datetime.utcnow())
+            .time(datetime.utcnow())
         try:
             client.write(point)
         except Exception as e:
@@ -158,3 +172,24 @@ if HAS_GPU:
         pynvml.nvmlShutdown()
     except:
         pass
+
+# --- CONSULTA DE VERIFICACIÓN: MOSTRAR TODAS LAS LECTURAS DE ESTA SESIÓN ---
+try:
+    table = client.query(
+        "SELECT * FROM system_monitor ORDER BY time ASC",
+        language="sql"
+    )
+
+    print("\nTodas las lecturas de esta sesión guardadas en InfluxDB:")
+    try:
+        import pandas as pd
+        df = table.to_pandas()
+        for idx, row in df.iterrows():
+            print(f"{row['time']} - CPU: {row['cpu_temp']:.1f}°C, GPU: {row['gpu_temp']:.1f}°C, Mem: {row['mem_percent']:.1f}%")
+    except:
+        for row in table:
+            print(row)
+
+except Exception as e:
+    print("Error al consultar InfluxDB:", e)
+
