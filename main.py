@@ -5,6 +5,7 @@ import os
 import datetime
 import psutil
 import wmi
+import requests  # <-- añadido
 
 # Intentar importar pynvml para GPU NVIDIA
 try:
@@ -64,6 +65,28 @@ def get_ip_address():
 
 IP_ADDR = get_ip_address()
 
+# --- TELEGRAM ---
+TELEGRAM_BOT_TOKEN = "8540727798:AAHdcpMpyceL4z7Pcbd5XGIxguVWnZDO1g4"
+TELEGRAM_CHAT_ID = "6340007840"
+
+def send_telegram(message: str) -> bool:
+    """Envía message al chat configurado. Devuelve True si ok."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram no configurado (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID vacíos).")
+        return False
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    try:
+        resp = requests.post(url, json=payload, timeout=6)
+        if resp.ok:
+            return True
+        else:
+            print("Telegram API responded:", resp.status_code, resp.text)
+            return False
+    except Exception as e:
+        print("Error al enviar Telegram:", e)
+        return False
+
 # --- hilos que simulan tareas ---
 def worker(name, interval):
     while not stop_event.is_set():
@@ -122,8 +145,10 @@ def cpu_monitor_loop():
         mem_percent = get_memory_usage()
         running_tasks = [t.name for t in threading.enumerate() if t.name.startswith("Worker-")]
 
-        # --- Escribir en monitor.log solo últimas 5 entradas ---
+        # --- Crear la entrada ---
         entry_text = create_log_entry(cpu_temp, gpu_temp, mem_percent, running_tasks)
+
+        # --- Escribir en monitor.log solo últimas 5 entradas ---
         with lock:
             entries.append(entry_text)
             if len(entries) > 5:
@@ -144,7 +169,6 @@ def cpu_monitor_loop():
 
         event_counter += 1
         print(f"Lectura {event_counter} guardada")
-
         time.sleep(1.0)
 
 # --- lanzar hilos workers ---
@@ -163,6 +187,15 @@ while event_counter < RUN_EVENTS:
 
 stop_event.set()
 time.sleep(0.2)
+
+# --- Enviar la última lectura por Telegram ---
+if entries:
+    ultima_entrada = entries[-1]
+    sent = send_telegram(ultima_entrada)
+    if sent:
+        print("Última entrada enviada por Telegram.")
+    else:
+        print("No se pudo enviar la última entrada por Telegram.")
 
 print(f"\nSe han guardado {RUN_EVENTS} lecturas en InfluxDB y las últimas 5 en '{LOG_FILE}'")
 
@@ -192,4 +225,3 @@ try:
 
 except Exception as e:
     print("Error al consultar InfluxDB:", e)
-
