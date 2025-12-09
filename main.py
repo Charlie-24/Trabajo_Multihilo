@@ -18,24 +18,12 @@ from datetime import datetime
 
 # --- Configuración de InfluxDB ---
 INFLUX_HOST = "http://localhost:8181"
-DATABASE = "Monitorizacion"
+DATABASE = "MonitorizacionPrueba2"
 client = InfluxDBClient3(host=INFLUX_HOST, database=DATABASE, token=None)
-
-# --- BORRAR Y RECREAR LA BASE DE DATOS ---
-try:
-    client.drop_database(DATABASE)
-    print(f"Base de datos '{DATABASE}' eliminada")
-except Exception as e:
-    print("No se pudo eliminar la base de datos (quizá no existía):", e)
-
-try:
-    client.create_database(DATABASE)
-    print(f"Base de datos '{DATABASE}' creada vacía")
-except Exception as e:
-    print("Error al crear la base de datos:", e)
+print(f"Conectado a InfluxDB, usando la base de datos '{DATABASE}'")
 
 # --- Configuración del log local ---
-LOG_FILE = "Trabajo_multihilo/monitor.log"
+LOG_FILE = "monitor.log"
 GPU_THRESHOLD = 20.0  # °C
 RUN_EVENTS = 6
 lock = threading.Lock()
@@ -129,25 +117,23 @@ def gpu_monitor_loop():
         # --- Crear la entrada ---
         entry_text = create_log_entry(gpu_temp, mem_percent, running_tasks)
 
-        # --- Guardar solo si se supera el umbral ---
+        # --- Guardar siempre en InfluxDB como texto completo ---
+        point = Point("system_monitor") \
+            .tag("host", IP_ADDR) \
+            .field("entry", entry_text) \
+            .time(datetime.utcnow())
+        try:
+            client.write(point)
+        except Exception as e:
+            print("Error al escribir en InfluxDB:", e)
+
+        # --- Guardar en log solo si supera el umbral ---
         if gpu_temp > GPU_THRESHOLD:
             with lock:
                 entries.append(entry_text)
                 if len(entries) > 5:
                     entries[:] = entries[-5:]
                 write_log_file()
-
-            # --- Guardar en InfluxDB ---
-            point = Point("system_monitor") \
-                .tag("host", IP_ADDR) \
-                .field("gpu_temp", gpu_temp) \
-                .field("mem_percent", mem_percent) \
-                .time(datetime.utcnow())
-            try:
-                client.write(point)
-            except Exception as e:
-                print("Error al escribir en InfluxDB:", e)
-
             print(f"Alerta GPU {gpu_temp:.1f}°C registrada")
 
         event_counter += 1
@@ -179,7 +165,7 @@ if entries:
     else:
         print("No se pudo enviar la última entrada por Telegram.")
 
-print(f"\nSe han registrado {len(entries)} alertas de GPU en InfluxDB y las últimas 5 en '{LOG_FILE}'")
+print(f"\nSe han registrado {len(entries)} alertas de GPU y las últimas 5 en '{LOG_FILE}'")
 
 # --- limpiar pynvml al final ---
 if HAS_GPU:
@@ -187,3 +173,22 @@ if HAS_GPU:
         pynvml.nvmlShutdown()
     except:
         pass
+
+# --- CONSULTA DE VERIFICACIÓN: MOSTRAR TODAS LAS LECTURAS DE ESTA SESIÓN ---
+try:
+    table = client.query(
+        "SELECT * FROM system_monitor ORDER BY time ASC",
+        language="sql"
+    )
+
+    print("\nTodas las lecturas de esta sesión guardadas en InfluxDB:")
+    try:
+        import pandas as pd
+        df = table.to_pandas()
+        for idx, row in df.iterrows():
+            print(row['entry'])
+    except:
+        for row in table:
+            print(row['entry'])
+except Exception as e:
+    print("Error al consultar InfluxDB:", e)
