@@ -2,10 +2,8 @@ import threading
 import time
 import socket
 import os
-import datetime
 import psutil
-import wmi
-import requests  # <-- añadido
+import requests
 
 # Intentar importar pynvml para GPU NVIDIA
 try:
@@ -16,7 +14,7 @@ except Exception:
     HAS_GPU = False
 
 from influxdb_client_3 import InfluxDBClient3, Point
-from datetime import datetime  # Para evitar conflictos con datetime.datetime
+from datetime import datetime
 
 # --- Configuración de InfluxDB ---
 INFLUX_HOST = "http://localhost:8181"
@@ -38,8 +36,8 @@ except Exception as e:
 
 # --- Configuración del log local ---
 LOG_FILE = "Trabajo_multihilo/monitor.log"
-THRESHOLD = 20.0  # °C
-RUN_EVENTS = 6    # número de lecturas
+GPU_THRESHOLD = 20.0  # °C
+RUN_EVENTS = 6
 lock = threading.Lock()
 entries = []
 event_counter = 0
@@ -70,7 +68,6 @@ TELEGRAM_BOT_TOKEN = "8540727798:AAHdcpMpyceL4z7Pcbd5XGIxguVWnZDO1g4"
 TELEGRAM_CHAT_ID = "6340007840"
 
 def send_telegram(message: str) -> bool:
-    """Envía message al chat configurado. Devuelve True si ok."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram no configurado (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID vacíos).")
         return False
@@ -78,11 +75,7 @@ def send_telegram(message: str) -> bool:
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
     try:
         resp = requests.post(url, json=payload, timeout=6)
-        if resp.ok:
-            return True
-        else:
-            print("Telegram API responded:", resp.status_code, resp.text)
-            return False
+        return resp.ok
     except Exception as e:
         print("Error al enviar Telegram:", e)
         return False
@@ -92,17 +85,7 @@ def worker(name, interval):
     while not stop_event.is_set():
         time.sleep(interval)
 
-# --- funciones para obtener datos reales ---
-def get_cpu_temperature():
-    try:
-        w = wmi.WMI(namespace="root\\wmi")
-        temps = w.MSAcpi_ThermalZoneTemperature()
-        if temps:
-            return temps[0].CurrentTemperature / 10 - 273.15
-    except:
-        pass
-    return 0.0
-
+# --- obtener datos reales ---
 def get_gpu_temperature():
     if not HAS_GPU:
         return 0.0
@@ -116,10 +99,9 @@ def get_memory_usage():
     return psutil.virtual_memory().percent
 
 # --- crear entrada de log ---
-def create_log_entry(cpu_temp, gpu_temp, mem_percent, running_tasks):
+def create_log_entry(gpu_temp, mem_percent, running_tasks):
     ts = datetime.now().strftime("%d %m %Y %H:%M:%S")
     lines = [
-        f"{ts} + CPU: {cpu_temp:.1f} °C + IP: {IP_ADDR}",
         f"{ts} + GPU: {gpu_temp:.1f} °C + IP: {IP_ADDR}",
         f"{ts} + Memoria: {mem_percent:.1f}% + IP: {IP_ADDR}",
         f"{ts} + Tareas: {', '.join(running_tasks)}"
@@ -136,39 +118,39 @@ def write_log_file():
     except Exception as e:
         print("Error al escribir el log:", e)
 
-# --- hilo monitor ---
-def cpu_monitor_loop():
+# --- hilo monitor GPU ---
+def gpu_monitor_loop():
     global event_counter
     while event_counter < RUN_EVENTS:
-        cpu_temp = get_cpu_temperature()
         gpu_temp = get_gpu_temperature()
         mem_percent = get_memory_usage()
         running_tasks = [t.name for t in threading.enumerate() if t.name.startswith("Worker-")]
 
         # --- Crear la entrada ---
-        entry_text = create_log_entry(cpu_temp, gpu_temp, mem_percent, running_tasks)
+        entry_text = create_log_entry(gpu_temp, mem_percent, running_tasks)
 
-        # --- Escribir en monitor.log solo últimas 5 entradas ---
-        with lock:
-            entries.append(entry_text)
-            if len(entries) > 5:
-                entries[:] = entries[-5:]
-            write_log_file()
+        # --- Guardar solo si se supera el umbral ---
+        if gpu_temp > GPU_THRESHOLD:
+            with lock:
+                entries.append(entry_text)
+                if len(entries) > 5:
+                    entries[:] = entries[-5:]
+                write_log_file()
 
-        # --- Guardar todas las lecturas en InfluxDB ---
-        point = Point("system_monitor") \
-            .tag("host", IP_ADDR) \
-            .field("cpu_temp", cpu_temp) \
-            .field("gpu_temp", gpu_temp) \
-            .field("mem_percent", mem_percent) \
-            .time(datetime.utcnow())
-        try:
-            client.write(point)
-        except Exception as e:
-            print("Error al escribir en InfluxDB:", e)
+            # --- Guardar en InfluxDB ---
+            point = Point("system_monitor") \
+                .tag("host", IP_ADDR) \
+                .field("gpu_temp", gpu_temp) \
+                .field("mem_percent", mem_percent) \
+                .time(datetime.utcnow())
+            try:
+                client.write(point)
+            except Exception as e:
+                print("Error al escribir en InfluxDB:", e)
+
+            print(f"Alerta GPU {gpu_temp:.1f}°C registrada")
 
         event_counter += 1
-        print(f"Lectura {event_counter} guardada")
         time.sleep(1.0)
 
 # --- lanzar hilos workers ---
@@ -178,7 +160,7 @@ for i in range(1, 5):
     t.start()
 
 # --- lanzar monitor ---
-monitor_thread = threading.Thread(target=cpu_monitor_loop, name="CPU-Monitor", daemon=True)
+monitor_thread = threading.Thread(target=gpu_monitor_loop, name="GPU-Monitor", daemon=True)
 monitor_thread.start()
 
 # --- esperar a que termine demo ---
@@ -188,7 +170,7 @@ while event_counter < RUN_EVENTS:
 stop_event.set()
 time.sleep(0.2)
 
-# --- Enviar la última lectura por Telegram ---
+# --- enviar la última lectura por Telegram ---
 if entries:
     ultima_entrada = entries[-1]
     sent = send_telegram(ultima_entrada)
@@ -197,7 +179,7 @@ if entries:
     else:
         print("No se pudo enviar la última entrada por Telegram.")
 
-print(f"\nSe han guardado {RUN_EVENTS} lecturas en InfluxDB y las últimas 5 en '{LOG_FILE}'")
+print(f"\nSe han registrado {len(entries)} alertas de GPU en InfluxDB y las últimas 5 en '{LOG_FILE}'")
 
 # --- limpiar pynvml al final ---
 if HAS_GPU:
@@ -205,23 +187,3 @@ if HAS_GPU:
         pynvml.nvmlShutdown()
     except:
         pass
-
-# --- CONSULTA DE VERIFICACIÓN: MOSTRAR TODAS LAS LECTURAS DE ESTA SESIÓN ---
-try:
-    table = client.query(
-        "SELECT * FROM system_monitor ORDER BY time ASC",
-        language="sql"
-    )
-
-    print("\nTodas las lecturas de esta sesión guardadas en InfluxDB:")
-    try:
-        import pandas as pd
-        df = table.to_pandas()
-        for idx, row in df.iterrows():
-            print(f"{row['time']} - CPU: {row['cpu_temp']:.1f}°C, GPU: {row['gpu_temp']:.1f}°C, Mem: {row['mem_percent']:.1f}%")
-    except:
-        for row in table:
-            print(row)
-
-except Exception as e:
-    print("Error al consultar InfluxDB:", e)
