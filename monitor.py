@@ -84,7 +84,7 @@ class SystemMonitor:
         self.ip_addr = get_ip_address()
         ensure_log_dir(self.log_file)
 
-        # 🔹 Inicializar CPU para psutil (para que la primera lectura sea correcta)
+        # Inicializar CPU para psutil 
         for p in psutil.process_iter(attrs=["pid", "name"]):
             p.cpu_percent(interval=0)
 
@@ -131,7 +131,7 @@ class SystemMonitor:
             .time(datetime.utcnow())
         )
         self.client.write(p)
-        # 🔍 DEBUG CONSOLA (se mantiene)
+        
         print(f"[InfluxDB] Entrada guardada:\n{entry}\n")
 
     # ---- PRODUCTOR ----
@@ -140,7 +140,6 @@ class SystemMonitor:
             gpu = self.get_gpu_temperature()
             mem = self.get_memory_usage()
 
-            # 🔹 Tareas reales, incluyendo la primera iteración
             tasks = [
                 f"{p.info['name']} (PID {p.info['pid']})"
                 for p in psutil.process_iter(attrs=["pid", "name"])
@@ -177,25 +176,10 @@ class SystemMonitor:
             self.write_influx(entry)
             self.influx_queue.task_done()
 
-    # ---- workers simulados (NO se tocan) ----
-    @staticmethod
-    def worker(interval, stop_event):
-        while not stop_event.is_set():
-            time.sleep(interval)
-
-    def start_workers(self):
-        for i in range(1, 5):
-            threading.Thread(
-                target=self.worker,
-                args=(0.5 + i * 0.2, self.stop_event),
-                name=f"Worker-{i}",
-                daemon=True
-            ).start()
-
     # ---- ejecución ----
     def run(self):
-        self.start_workers()
-
+        
+        # Inicializazcion de hilos daemon 
         threading.Thread(target=self.log_worker, daemon=True).start()
         threading.Thread(target=self.influx_worker, daemon=True).start()
         threading.Thread(target=self.gpu_monitor_loop, daemon=True).start()
@@ -207,7 +191,7 @@ class SystemMonitor:
         self.log_queue.join()
         self.influx_queue.join()
 
-        # 🔹 Enviar Telegram sin duplicar escritura en InfluxDB
+        # Enviar Telegram
         if self.last_alert:
             send_telegram(self.last_alert)
             print("[Telegram] Última entrada enviada y almacenada en InfluxDB.")
