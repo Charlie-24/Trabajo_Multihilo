@@ -84,13 +84,21 @@ class SystemMonitor:
         self.ip_addr = get_ip_address()
         ensure_log_dir(self.log_file)
 
+        # 🔹 Inicializar CPU para psutil (para que la primera lectura sea correcta)
+        for p in psutil.process_iter(attrs=["pid", "name"]):
+            p.cpu_percent(interval=0)
+
     # ---- getters ----
     def get_gpu_temperature(self) -> float:
         if not HAS_GPU:
             return 0.0
         try:
             h = pynvml.nvmlDeviceGetHandleByIndex(0)
-            return float(pynvml.nvmlDeviceGetTemperature(h, pynvml.NVML_TEMPERATURE_GPU))
+            return float(
+                pynvml.nvmlDeviceGetTemperature(
+                    h, pynvml.NVML_TEMPERATURE_GPU
+                )
+            )
         except Exception:
             return 0.0
 
@@ -116,23 +124,33 @@ class SystemMonitor:
                     f.write("\n\n---\n\n")
 
     def write_influx(self, entry: str):
-        p = Point("system_monitor").tag("host", self.ip_addr).field("entry", entry).time(datetime.utcnow())
+        p = (
+            Point("system_monitor")
+            .tag("host", self.ip_addr)
+            .field("entry", entry)
+            .time(datetime.utcnow())
+        )
         self.client.write(p)
-        print(f"[InfluxDB] Entrada guardada:\n{entry}\n")  # debug por consola
+        # 🔍 DEBUG CONSOLA (se mantiene)
+        print(f"[InfluxDB] Entrada guardada:\n{entry}\n")
 
     # ---- PRODUCTOR ----
     def gpu_monitor_loop(self):
         while self.event_counter < self.run_events:
             gpu = self.get_gpu_temperature()
             mem = self.get_memory_usage()
-            tasks = [t.name for t in threading.enumerate() if t.name.startswith("Worker-")]
+
+            # 🔹 Tareas reales, incluyendo la primera iteración
+            tasks = [
+                f"{p.info['name']} (PID {p.info['pid']})"
+                for p in psutil.process_iter(attrs=["pid", "name"])
+            ][:5]
 
             if gpu > self.gpu_threshold:
                 entry = self.create_log_entry(gpu, mem, tasks)
-                # Enviar a los consumidores
                 self.log_queue.put(entry)
                 self.influx_queue.put(entry)
-                self.last_alert = entry  # solo última entrada para Telegram
+                self.last_alert = entry
 
             self.event_counter += 1
             time.sleep(1)
@@ -159,7 +177,7 @@ class SystemMonitor:
             self.write_influx(entry)
             self.influx_queue.task_done()
 
-    # ---- workers simulados ----
+    # ---- workers simulados (NO se tocan) ----
     @staticmethod
     def worker(interval, stop_event):
         while not stop_event.is_set():
@@ -178,29 +196,22 @@ class SystemMonitor:
     def run(self):
         self.start_workers()
 
-        # Consumidores
         threading.Thread(target=self.log_worker, daemon=True).start()
         threading.Thread(target=self.influx_worker, daemon=True).start()
-
-        # Productor
         threading.Thread(target=self.gpu_monitor_loop, daemon=True).start()
 
-        # Esperar a terminar eventos
         while self.event_counter < self.run_events:
             time.sleep(0.2)
 
-        # Marcar parada y esperar a que las colas terminen
         self.stop_event.set()
         self.log_queue.join()
         self.influx_queue.join()
 
-        # Última entrada: escribir directamente y enviar por Telegram
+        # 🔹 Enviar Telegram sin duplicar escritura en InfluxDB
         if self.last_alert:
-            self.write_influx(self.last_alert)
             send_telegram(self.last_alert)
             print("[Telegram] Última entrada enviada y almacenada en InfluxDB.")
 
-    # ---- consulta SQL final (una vez) ----
     def print_all_influx_entries(self):
         try:
             results = self.client.query(
@@ -209,10 +220,7 @@ class SystemMonitor:
             )
             print("\nEntradas almacenadas en InfluxDB (consulta SQL):")
             for row in results:
-                if isinstance(row, dict) and "entry" in row:
-                    print(row["entry"])
-                else:
-                    print(row)
+                print(row)
         except Exception as e:
             print("Error consultando InfluxDB:", e)
 
@@ -233,7 +241,6 @@ def main():
     )
     try:
         monitor.run()
-        # Llamada a la consulta solo 1 vez
         monitor.print_all_influx_entries()
     finally:
         monitor.shutdown()
